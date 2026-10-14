@@ -1,0 +1,234 @@
+{
+  "id": "b8f0d3c1-5a4e-4f77-9b21-7c6d5e4f3a2b",
+  "revision": 0,
+  "last_node_id": 3,
+  "last_link_id": 2,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadImage",
+      "pos": [
+        40,
+        200
+      ],
+      "size": [
+        330,
+        330
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            1
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "example.png",
+        "image"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "VergoraImageEditor",
+      "pos": [
+        420,
+        160
+      ],
+      "size": [
+        400,
+        420
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 1
+        },
+        {
+          "localized_name": "prompt",
+          "name": "prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "prompt"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "COMBO",
+          "widget": {
+            "name": "model"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "size",
+          "name": "size",
+          "type": "COMBO",
+          "widget": {
+            "name": "size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "image_url",
+          "name": "image_url",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "image_url"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "extra_json",
+          "name": "extra_json",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "extra_json"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "model_override",
+          "name": "model_override",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "model_override"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            2
+          ]
+        },
+        {
+          "localized_name": "image_path",
+          "name": "image_path",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "localized_name": "image_url",
+          "name": "image_url",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VergoraImageEditor"
+      },
+      "widgets_values": [
+        "Turn this into a loose watercolour painting, keep the composition",
+        "gpt-image-2",
+        "1024x1024",
+        "",
+        "",
+        ""
+      ],
+      "widgets_values_named": {
+        "prompt": "Turn this into a loose watercolour painting, keep the composition",
+        "model": "gpt-image-2",
+        "size": "1024x1024",
+        "image_url": "",
+        "extra_json": "",
+        "model_override": ""
+      }
+    },
+    {
+      "id": 3,
+      "type": "SaveImage",
+      "pos": [
+        880,
+        160
+      ],
+      "size": [
+        400,
+        450
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 2
+        },
+        {
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "SaveImage"
+      },
+      "widgets_values": [
+        "vergora/image-edit"
+      ]
+    }
+  ],
+  "links": [
+    {
+      "id": 1,
+      "origin_id": 1,
+      "origin_slot": 0,
+      "target_id": 2,
+      "target_slot": 0,
+      "type": "IMAGE"
+    },
+    {
+      "id": 2,
+      "origin_id": 2,
+      "origin_slot": 0,
+      "target_id": 3,
+      "target_slot": 0,
+      "type": "IMAGE"
+    }
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 1.0,
+      "offset": [
+        0,
+        0
+      ]
+    }
+  },
+  "version": 0.4
+}

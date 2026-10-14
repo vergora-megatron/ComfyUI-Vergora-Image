@@ -1,0 +1,51 @@
+# ---------------------------------------------------------------------------
+# Vergora image nodes - configuration
+#
+# How to use:
+#   1. copy this file to "config.ini" in the same folder
+#        Windows:        copy config.ini.example config.ini
+#        macOS / Linux:  cp config.ini.example config.ini
+#   2. fill in KEY with your Vergora API key
+#   3. restart ComfyUI
+#
+# "config.ini" is listed in .gitignore, so your key never reaches the repo.
+# Environment variables win over this file:
+#   VERGORA_BASE_URL, VERGORA_API_KEY
+#
+# If you also installed the Vergora video pack, you can either fill both files
+# or set VERGORA_API_KEY once in the environment.
+# ---------------------------------------------------------------------------
+
+[API]
+
+# Gateway base URL. Do not add a trailing slash.
+BASE_URL = https://api.vergora.ai/v1
+
+# Your API key. Required - the node raises a clear error if this is empty.
+# Get it from your Vergora console; it looks like "sk-xxxxxxxx..."
+KEY =
+
+[RUNTIME]
+
+# Maximum seconds to wait for one picture. Image generation is a synchronous
+# request (no polling) and normally answers in 15 to 40 seconds; the platform
+# edge cuts the connection at roughly a minute, so a smaller value only makes
+# the error appear sooner.
+TIMEOUT = 300
+
+# Folder where finished pictures are saved.
+# Leave empty to use ComfyUI's own output directory (recommended).
+OUTPUT_DIR =
+
+# ---------------------------------------------------------------------------
+# 中文说明
+#
+# 1. 把这个文件复制为 config.ini（Windows 命令：copy config.ini.example config.ini）
+# 2. 在 KEY 后面填上你在 Vergora 控制台拿到的密钥，形如 sk-xxxxxxxx
+# 3. 重启 ComfyUI
+#
+# BASE_URL 一般不用改；TIMEOUT 是单张图最长等待（秒），出图是同步请求、通常 15 到 40 秒；
+# OUTPUT_DIR 留空表示存到 ComfyUI 自己的输出目录。config.ini 已被 .gitignore 忽略，
+# 不会把你的密钥提交到仓库。也可以用环境变量 VERGORA_API_KEY / VERGORA_BASE_URL 代替本文件，
+# 环境变量的优先级更高；装了视频节点包的话，用环境变量只需配一次。
+# ---------------------------------------------------------------------------

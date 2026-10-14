@@ -1,0 +1,12 @@
+[project]
+name = "comfyui-vergora-image"
+version = "0.1.0"
+description = "ComfyUI nodes for GPT-Image text-to-image and image editing through the Vergora API"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[tool.comfy]
+PublisherId = "vergora"
+DisplayName = "ComfyUI Vergora Image"
+Icon = ""
