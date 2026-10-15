@@ -271,6 +271,8 @@ def main():
         (401, '{"error":{"message":"invalid token"}}', "密钥"),
         (403, '{"error":{"message":"insufficient_quota"}}', "额度"),
         (524, '{"error":{"message":"edge timeout"}}', "边缘节点超时"),
+        (500, '{"error":{"message":"do request failed: context deadline exceeded",'
+              '"code":"do_request_failed"}}', "上游超时"),
         (500, '{"error":{"message":"model price is unavailable","code":"model_price_unavailable"}}',
          "没有定价"),
     ]

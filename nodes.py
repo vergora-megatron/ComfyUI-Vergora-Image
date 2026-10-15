@@ -462,6 +462,10 @@ def describe_error(status, text):
     elif status == 524:
         hint = ("（平台边缘节点超时：出图是同步请求，等太久会被切断，调小 size 或稍后重试 / "
                 "the platform edge timed out - image generation is a synchronous request）")
+    elif status == 500 and ("do request failed" in lowered or "do_request_failed" in lowered
+                            or "context deadline exceeded" in lowered):
+        hint = ("（平台转发到上游超时：属于平台/上游侧问题，不是你的参数问题，稍后重试即可 / "
+                "the relay's upstream provider timed out - platform side, not your parameters）")
     elif "model_price_unavailable" in lowered:
         hint = ("（这个模型在平台侧没有定价，目前调不通；请改用 gpt-image-2 / gpt-image-2.5-flare / "
                 "gpt-image-2.5-sunburst / the model has no price configured upstream - use one of the "
