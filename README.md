@@ -204,29 +204,26 @@ deliberately not exposed: a ComfyUI node returns one finished value, not a strea
 ## Model coverage, checked 2026-10-14
 
 The catalogue page and `GET /v1/models` agree, so there is no hidden tier of image models
-behind the key. Five models list an image output:
+behind the key. Three models list an image output, and all three answer on both routes:
 
 | Model | Text to image | Image edit | Note |
 | --- | --- | --- | --- |
 | `gpt-image-2` | works | works | default |
 | `gpt-image-2.5-flare` | works | works | |
 | `gpt-image-2.5-sunburst` | works | works | |
-| `gemini-3-pro-image-preview` | `500` | `500` | in the catalogue, no price configured upstream - kept out of the dropdown, reachable via `model_override` |
-| `gemini-3.1-flash-image-preview` | `500` | `500` | in the catalogue, no price configured upstream - kept out of the dropdown, reachable via `model_override` |
 
-The dropdown only offers the three that work. The gemini pair is deliberately not in it -
-they are in the catalogue, but every call answers `500 model_price_unavailable`, so listing
-them would only produce a failed run. Once the platform sets a price, paste the id into
-`model_override` (or add it to `IMAGE_MODELS` at the top of `nodes.py`).
+The dropdown offers exactly these three, so nothing in it can fail on arrival. A model the
+platform adds later - or any id printed by `list_models.py` that is not here - goes through
+`model_override` (or can be added to `IMAGE_MODELS` at the top of `nodes.py`).
 
-Twenty-five other plausible ids were fired at the gateway as a check
+Twenty-two other plausible ids were fired at the gateway as a check
 (`gpt-image-1`, `gpt-image-1.5`, `gpt-image-3`, `seedream-4.0`, `seedream-4`,
 `seededit-4.0`, `doubao-seedream-4.0`, `nano-banana`, `nano-banana-pro`, `qwen-image`,
 `qwen-image-edit`, `wan2.5-image`, `flux-1.1-pro`, `flux-2`, `flux-kontext-pro`,
 `ideogram-v3`, `recraft-v3`, `hunyuan-image-3`, `z-image`, `kolors-2`, `imagen-4`,
-`gemini-2.5-flash-image`, `gemini-3-flash-image-preview`, `gpt-image-2.5`). Every one of
-them answered `503 No available channel for model ...`, which means the gateway has no
-channel for that name at all - those requests are rejected before anything is billed.
+`gpt-image-2.5`). Every one of them answered `503 No available channel for model ...`, which
+means the gateway has no channel for that name at all - those requests are rejected before
+anything is billed.
 
 So if a model is missing from the dropdown, it is missing from the platform, not from the
 node: enable and price it on the Vergora side, then run `python list_models.py` to see it
@@ -243,14 +240,13 @@ model page's own payload (checked 2026-10-14):
 | `gpt-image-2` | 0.04 USD |
 | `gpt-image-2.5-flare` | 0.042144 USD |
 | `gpt-image-2.5-sunburst` | 0.033716 USD |
-| `gemini-3-pro-image-preview` | none set - only token rates (1.6 in / 96 out per 1M) |
-| `gemini-3.1-flash-image-preview` | none set - only token rates (0.2 in / 48 out per 1M) |
 
-The two gemini rows having an image price of `0` is exactly why the gateway answers
-`model_price_unavailable` for them: the platform has nothing to charge, so it refuses the
-call. A run takes roughly 15 to 40 seconds. A request that comes back as an error is not
-delivered, but if the upstream had already rendered the picture it can still show up on the
-bill - check the console before pointing a batch of images at it.
+An image model whose price is `0` is one the platform cannot charge for, and every call to it
+answers `500 model_price_unavailable` - the gateway refusing the call rather than the node
+failing, which is why only models that answer are offered. A run takes roughly 15 to 40
+seconds. A request that comes back as an error is not delivered, but if the upstream had
+already rendered the picture it can still show up on the bill - check the console before
+pointing a batch of images at it.
 
 ## Troubleshooting
 
@@ -259,7 +255,7 @@ bill - check the console before pointing a batch of images at it.
 | `没有配置 API key` | `KEY` is empty in `config.ini` and `VERGORA_API_KEY` is not set |
 | `401` | Wrong or expired key |
 | `503 No available channel for model xxx` | The model name is not available on the platform |
-| `500 model_price_unavailable` | The model is in the catalogue but has no price configured, so it cannot be called (both gemini image models behave this way) |
+| `500 model_price_unavailable` | The model is in the catalogue but has no price configured, so the platform refuses the call |
 | `524` | The platform edge timed out. Image generation is synchronous, so a slow job can trip it; retry, or use a smaller `size`. This is the platform's edge timeout, not a local one |
 | `403 insufficient_quota` | The account behind the key is out of quota. Top it up in the console |
 | `400` | The upstream rejected the parameters - the gateway message is shown in the error |
@@ -271,8 +267,9 @@ bill - check the console before pointing a batch of images at it.
 - `image_url` is a temporary CDN link on the platform's asset host (we saw
   `www.aicost.me`). Files are saved locally when they are generated; do not store the URL as
   a permanent link, and if a front end whitelists hosts, that host needs to be allowed.
-- The two gemini image models in the catalogue are listed but not usable
-  (`model_price_unavailable`), so they are not offered as options.
+- A catalogue entry without a price answers `500 model_price_unavailable` on every call; that
+  is why the dropdown only offers models that answer, and why `list_models.py` is worth a look
+  after the platform adds something.
 - Pricing, availability and the accepted parameters belong to the platform; the nodes pass
   them through and only validate the obvious mistakes locally.
 - The nodes deliberately do **not** retry a failed picture. A `524` can mean the picture
@@ -327,10 +324,7 @@ MIT. See `LICENSE`.
 `VERGORA_API_KEY` / `VERGORA_BASE_URL`（优先级更高），装了视频节点包的话，这样只需配一次。
 
 **模型**：下拉框只列**真能出图的三个**——`gpt-image-2`（默认）、`gpt-image-2.5-flare`、
-`gpt-image-2.5-sunburst`，这样下拉里不会出现"选中必报错"的选项。目录里还有
-`gemini-3-pro-image-preview`、`gemini-3.1-flash-image-preview`，但调用一律返回
-`500 model_price_unavailable`（平台侧没配价格），所以**故意不放进下拉框**；等平台给它们配了价格，
-把 id 填到 `model_override` 就能用（或者把它加进 `nodes.py` 顶部的 `IMAGE_MODELS`）。
+`gpt-image-2.5-sunburst`，这样下拉里不会出现"选中必报错"的选项。
 
 如果平台以后上新模型、而下拉框里还没有，不用改代码：把模型 id 填进 **`model_override`**
 （优先级高于下拉框）即可；也可以先跑 `python list_models.py`，它会用你的密钥列出平台上所有模型、
@@ -400,12 +394,10 @@ client.images.edit(model="gpt-image-2", image=open("in.png", "rb"), prompt="改�
 | `gpt-image-2` | 0.04 美元 |
 | `gpt-image-2.5-flare` | 0.042144 美元 |
 | `gpt-image-2.5-sunburst` | 0.033716 美元 |
-| `gemini-3-pro-image-preview` | 没设单张价格，只有 token 单价（输入 1.6 / 输出 96 每百万） |
-| `gemini-3.1-flash-image-preview` | 没设单张价格，只有 token 单价（输入 0.2 / 输出 48 每百万） |
 
-后两个 gemini 模型的单张价格为 0，正是网关回 `model_price_unavailable` 的原因——平台没有可计费的
-价格，所以直接拒掉。失败的请求不会返回图片，但如果上游其实已经出图、只是边缘节点没等到返回，
-账单里仍可能出现这一笔。
+单张价格为 0 的图像模型，平台算不出该收多少钱，调用会直接被拒（`500 model_price_unavailable`）——
+这是网关在拒，不是节点坏了；也正因如此，下拉框只放真的能出图的模型。失败的请求不会返回图片，但如果
+上游其实已经出图、只是边缘节点没等到返回，账单里仍可能出现这一笔。
 
 **报错对照**
 
@@ -414,7 +406,7 @@ client.images.edit(model="gpt-image-2", image=open("in.png", "rb"), prompt="改�
 | `没有配置 API key` | `config.ini` 的 `KEY` 是空的，也没设 `VERGORA_API_KEY` |
 | `401` | 密钥不对或过期 |
 | `503 No available channel for model xxx` | 模型名不在平台可用列表里 |
-| `500 model_price_unavailable` | 模型在目录里但平台没配价格，调不通（两个 gemini 出图模型就是这样） |
+| `500 model_price_unavailable` | 模型在目录里但平台没配价格，网关直接拒掉这次调用 |
 | `524` | 平台边缘节点超时；出图是同步请求，上游慢就会撞上，重试或把 `size` 调小 |
 | `403 insufficient_quota` | 账号额度不足，去控制台充值 |
 

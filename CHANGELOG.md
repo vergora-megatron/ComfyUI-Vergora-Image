@@ -29,6 +29,11 @@ Notes
 - `partial_images` / `stream` are intentionally not exposed: a ComfyUI node returns one finished
   value.
 
+Changed
+
+- The documentation now lists only the image models the platform actually serves; no other
+  provider's model ids appear anywhere in the pack.
+
 ## 0.1.0 - 2026-10-14
 
 First release: two nodes for the Vergora image routes, both verified live against
@@ -38,9 +43,9 @@ Added
 
 - `VergoraImageGenerator` (文生图) for `POST /images/generations` and `VergoraImageEditor`
   (图像编辑) for `POST /images/edits`.
-- Models: `gpt-image-2`, `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`. The two gemini image
-  models in the catalogue answer `500 model_price_unavailable` on every route, so they are kept
-  out of the dropdown; `model_override` reaches any id, including models added later.
+- Models: `gpt-image-2`, `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst` - only ids that answer
+  are listed, so nothing in the dropdown fails on arrival; `model_override` reaches any other id,
+  including models added later.
 - Sizes: `1024x1024`, `1536x1024`, `1024x1536`, `1080x1920` (vertical) or `auto`.
 - Outputs: an `IMAGE` you can wire straight into another node, the path of the saved file and the
   temporary platform URL; the picture is also rendered in the result panel.

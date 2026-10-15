@@ -60,10 +60,8 @@ CONFIG_PATH = os.path.join(HERE, "config.ini")
 DEFAULT_BASE_URL = "https://api.vergora.ai/v1"
 
 # Only models that actually answer are listed, so nothing in the dropdown can fail
-# on arrival. The catalogue also lists gemini-3-pro-image-preview and
-# gemini-3.1-flash-image-preview, but both reply 500 `model_price_unavailable` on
-# every route; type one into `model_override` once the platform gives it a price.
-# See list_models.py for the full catalogue as your key sees it.
+# on arrival. Anything the platform adds later - or an id printed by list_models.py
+# that is not here - goes through `model_override` without touching this file.
 IMAGE_MODELS = ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]
 
 # "auto" omits the field and lets the service pick. Any size is forwarded (and can

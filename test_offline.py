@@ -182,14 +182,14 @@ def main():
     assert int(result[0].shape[0]) == 2, result[0].shape
     assert len(result[2].splitlines()) == 2, result[2]
     STATE["entries"] = 1
-    # only models that answer are offered; the unpriced gemini pair stays out of
-    # the dropdown but is still reachable through model_override
+    # only models that answer are offered; any other id still goes through
+    # model_override, which is how a model added later works without a code change
     assert nodes.IMAGE_MODELS == ["gpt-image-2", "gpt-image-2.5-flare",
                                   "gpt-image-2.5-sunburst"], nodes.IMAGE_MODELS
-    assert "gemini-3-pro-image-preview" not in nodes.IMAGE_MODELS
+    assert "some-other-image-model" not in nodes.IMAGE_MODELS
     call(generator, prompt="x", model="gpt-image-2", size="auto",
-         model_override="gemini-3-pro-image-preview")
-    assert STATE["payload"]["model"] == "gemini-3-pro-image-preview", STATE["payload"]
+         model_override="some-other-image-model")
+    assert STATE["payload"]["model"] == "some-other-image-model", STATE["payload"]
 
     # ---- image editing: single picture goes as a string ----
     single = np.zeros((32, 40, 3), dtype=np.float32)
