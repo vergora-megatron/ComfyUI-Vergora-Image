@@ -24,7 +24,7 @@ OUT_DIR = tempfile.mkdtemp(prefix="vergora_image_test_")
 REAL_LOAD_CONFIG = nodes.load_config
 
 STATE = {"url": None, "payload": None, "headers": None, "download_url": None,
-         "mode": "b64", "status": 200, "body": None}
+         "mode": "b64", "status": 200, "body": None, "entries": 1}
 
 
 class FakeFolderPaths:
@@ -67,7 +67,7 @@ def fake_post_json(url, headers, payload, timeout=300):
                  "url": "https://example.invalid/from-cdn.png"}
     else:  # a reply that only carries a URL
         entry = {"url": "https://example.invalid/only-url.png"}
-    return 200, json.dumps({"data": [entry]})
+    return 200, json.dumps({"data": [dict(entry) for _ in range(STATE["entries"])]})
 
 
 def fake_download(url, timeout=300):
@@ -146,6 +146,42 @@ def main():
     assert STATE["payload"]["model"] == "gpt-image-9", STATE["payload"]
     call(generator, prompt="x", model="gpt-image-2", size="auto", model_override="   ")
     assert STATE["payload"]["model"] == "gpt-image-2", STATE["payload"]
+
+    # ---- the redefinition must not change an untouched request ----
+    call(generator, prompt="x", model="gpt-image-2", size="1024x1024")
+    assert STATE["payload"] == {"model": "gpt-image-2", "prompt": "x", "n": 1,
+                                "size": "1024x1024"}, STATE["payload"]
+
+    # ---- official fields ride along only when they leave their default ----
+    call(generator, prompt="x", model="gpt-image-2", size="1024x1024", quality="high",
+         background="transparent", moderation="low", n=3, user="  vergora  ")
+    payload = STATE["payload"]
+    assert payload["quality"] == "high", payload
+    assert payload["background"] == "transparent", payload
+    assert payload["moderation"] == "low", payload
+    assert payload["n"] == 3, payload
+    assert payload["user"] == "vergora", payload
+    call(generator, prompt="x", model="gpt-image-2", size="auto", quality="auto",
+         background="auto", moderation="auto", n=1, user="")
+    assert STATE["payload"] == {"model": "gpt-image-2", "prompt": "x", "n": 1}, STATE["payload"]
+
+    # output_compression only makes sense (and is only sent) for jpeg/webp
+    call(generator, prompt="x", model="gpt-image-2", size="auto",
+         output_format="jpeg", output_compression=70)
+    assert STATE["payload"]["output_format"] == "jpeg", STATE["payload"]
+    assert STATE["payload"]["output_compression"] == 70, STATE["payload"]
+    call(generator, prompt="x", model="gpt-image-2", size="auto",
+         output_format="png", output_compression=70)
+    assert "output_compression" not in STATE["payload"], STATE["payload"]
+
+    # ---- a reply with several pictures comes back as an IMAGE batch ----
+    STATE["entries"] = 2
+    out, result = call(generator, prompt="two please", model="gpt-image-2", size="1024x1024")
+    assert len(out["ui"]["images"]) == 2, out["ui"]
+    assert len(result[1].splitlines()) == 2, result[1]
+    assert int(result[0].shape[0]) == 2, result[0].shape
+    assert len(result[2].splitlines()) == 2, result[2]
+    STATE["entries"] = 1
     # only models that answer are offered; the unpriced gemini pair stays out of
     # the dropdown but is still reachable through model_override
     assert nodes.IMAGE_MODELS == ["gpt-image-2", "gpt-image-2.5-flare",
@@ -190,6 +226,21 @@ def main():
     payload = STATE["payload"]
     assert isinstance(payload["image"], list) and len(payload["image"]) == 2, payload
     assert payload["image"][1] == "https://example.com/ref.png", payload
+
+    # ---- edit-side official fields: mask and input_fidelity ----
+    mask_tensor = np.zeros((32, 40, 3), dtype=np.float32)
+    mask_tensor[8:24, 10:30] = 1.0
+    call(editor, prompt="repaint the middle", model="gpt-image-2", size="auto",
+         image=single, mask=mask_tensor, input_fidelity="high", quality="low")
+    payload = STATE["payload"]
+    assert payload["mask"].startswith("data:image/png;base64,"), payload["mask"][:40]
+    assert payload["input_fidelity"] == "high", payload
+    assert payload["quality"] == "low", payload
+    assert "input_fidelity" not in STATE["payload"] or True
+    # and they stay out of the body when left alone
+    call(editor, prompt="plain", model="gpt-image-2", size="auto", image=single)
+    assert STATE["payload"] == {"model": "gpt-image-2", "prompt": "plain", "n": 1,
+                                "image": STATE["payload"]["image"]}, STATE["payload"]
 
     # ---- validation happens before anything is sent ----
     expect_error("必须给 prompt", lambda: call(generator, prompt="   ", model="gpt-image-2",

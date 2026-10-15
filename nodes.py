@@ -74,6 +74,15 @@ SIZES = ["1024x1024", "1536x1024", "1024x1536", "1080x1920", "auto"]
 
 MAX_EDIT_IMAGES = 10
 
+# The official Images API vocabulary. "auto"/"default" means "do not send the
+# field", so a node that is not touched sends exactly the request it sent before
+# these widgets existed.
+QUALITIES = ["auto", "low", "medium", "high"]
+BACKGROUNDS = ["auto", "transparent", "opaque"]
+OUTPUT_FORMATS = ["auto", "png", "jpeg", "webp"]
+MODERATIONS = ["auto", "low"]
+INPUT_FIDELITIES = ["default", "low", "high"]
+
 CATEGORY = "vergora"
 
 
@@ -253,24 +262,34 @@ def split_uri_lines(text):
 
 
 def decode_image(data):
-    """Pull the picture out of a response body: (bytes, source_url).
+    """Pull the first picture out of a response body: (bytes, source_url)."""
+    return decode_images(data)[0]
+
+
+def decode_images(data):
+    """Every picture in a reply as a list of (bytes, source_url).
 
     The inline copy is preferred so the node never has to re-download from the
-    CDN; the URL is only used when a response omits the base64 payload.
+    CDN; the URL is only used when a reply omits the base64 payload.
     """
     entries = data.get("data") if isinstance(data, dict) else None
     if not isinstance(entries, list) or not entries:
         raise RuntimeError("返回里没有图片 / response has no image entry: %s" % json.dumps(data)[:400])
-    entry = entries[0]
-    if not isinstance(entry, dict):
-        raise RuntimeError("图片条目格式不对 / unexpected image entry: %s" % str(entry)[:300])
-    if entry.get("b64_json"):
-        return base64.b64decode(entry["b64_json"]), entry.get("url") or ""
-    for key in ("url", "image_url"):
-        if isinstance(entry.get(key), str) and entry[key]:
-            return http_download(entry[key]), entry[key]
-    raise RuntimeError("图片条目里既没有 b64_json 也没有 url / no b64_json or url in the entry: %s"
-                       % json.dumps(entry)[:300])
+    pictures = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RuntimeError("图片条目格式不对 / unexpected image entry: %s" % str(entry)[:300])
+        if entry.get("b64_json"):
+            pictures.append((base64.b64decode(entry["b64_json"]), entry.get("url") or ""))
+            continue
+        for key in ("url", "image_url"):
+            if isinstance(entry.get(key), str) and entry[key]:
+                pictures.append((http_download(entry[key]), entry[key]))
+                break
+        else:
+            raise RuntimeError("图片条目里既没有 b64_json 也没有 url / no b64_json or url "
+                               "in the entry: %s" % json.dumps(entry)[:300])
+    return pictures
 
 
 def save_image(raw, cfg, prefix):
@@ -291,15 +310,25 @@ def save_image(raw, cfg, prefix):
     return path
 
 
+def save_images(payloads, cfg, prefix):
+    """Save one or more pictures; extra ones get a numeric suffix."""
+    paths = []
+    for index, raw in enumerate(payloads):
+        paths.append(save_image(raw, cfg, prefix if index == 0 else "%s_%d" % (prefix, index + 1)))
+    return paths
+
+
 def to_image_tensor(raw):
-    """Response bytes -> the IMAGE value ComfyUI nodes pass around."""
+    """One or more response payloads -> the IMAGE value ComfyUI nodes pass around."""
     if Image is None:
         raise RuntimeError("需要 Pillow 才能解码图片 / Pillow is required to decode the image")
-    image = Image.open(BytesIO(raw)).convert("RGB")
-    arr = np.asarray(image).astype(np.float32) / 255.0
+    payloads = raw if isinstance(raw, (list, tuple)) else [raw]
+    frames = [np.asarray(Image.open(BytesIO(item)).convert("RGB")).astype(np.float32) / 255.0
+              for item in payloads]
+    arr = frames[0][None, ...] if len(frames) == 1 else np.stack(frames)
     if torch is not None:
-        return torch.from_numpy(arr)[None, ...]
-    return arr[None, ...]
+        return torch.from_numpy(arr)
+    return arr
 
 
 def resolve_output_dir(cfg):
@@ -338,18 +367,47 @@ def build_preview_ui(path):
 # Request building
 # --------------------------------------------------------------------------
 
-def build_generation_payload(prompt, model, size, extra_json=""):
+def official_options(quality="auto", background="auto", output_format="auto",
+                     output_compression=0, moderation="auto", n=1, user="",
+                     input_fidelity="default"):
+    """The official Images API fields, each sent only when it is not its default.
+
+    Leaving the defaults out keeps an untouched node's request byte-for-byte the
+    same as it was before these widgets existed.
+    """
+    options = {}
+    if quality and quality != "auto":
+        options["quality"] = quality
+    if background and background != "auto":
+        options["background"] = background
+    if output_format and output_format != "auto":
+        options["output_format"] = output_format
+    if output_format in ("jpeg", "webp") and int(output_compression or 0) > 0:
+        options["output_compression"] = int(output_compression)
+    if moderation and moderation != "auto":
+        options["moderation"] = moderation
+    if n is not None and int(n) > 1:
+        options["n"] = int(n)
+    if user and str(user).strip():
+        options["user"] = str(user).strip()
+    if input_fidelity and input_fidelity != "default":
+        options["input_fidelity"] = input_fidelity
+    return options
+
+
+def build_generation_payload(prompt, model, size, options=None, extra_json=""):
     if not (prompt and prompt.strip()):
         raise RuntimeError("文生图必须给 prompt / text to image needs a prompt")
     payload = {"model": model, "prompt": prompt.strip(), "n": 1}
     if size and size != "auto":
         payload["size"] = size
+    payload.update(options or {})
     if extra_json and extra_json.strip():
         payload.update(parse_extra_json(extra_json))
     return payload
 
 
-def build_edit_payload(prompt, model, size, images, extra_json=""):
+def build_edit_payload(prompt, model, size, images, options=None, mask=None, extra_json=""):
     images = list(images or [])
     if not images:
         raise RuntimeError(
@@ -364,8 +422,11 @@ def build_edit_payload(prompt, model, size, images, extra_json=""):
     # A single picture goes as a plain string, several as an array - the gateway
     # accepts both shapes.
     payload["image"] = images[0] if len(images) == 1 else images
+    if mask:
+        payload["mask"] = mask
     if size and size != "auto":
         payload["size"] = size
+    payload.update(options or {})
     if extra_json and extra_json.strip():
         payload.update(parse_extra_json(extra_json))
     return payload
@@ -437,41 +498,74 @@ def short_value(value):
     return value
 
 
-def generate_image(prompt, model, size, extra_json=""):
+def generate_image(prompt, model, size, options=None, extra_json=""):
     cfg = load_config()
-    payload = build_generation_payload(prompt, model, size, extra_json)
+    payload = build_generation_payload(prompt, model, size, options, extra_json)
     data = request_image(cfg, "/images/generations", payload, "文生图 / text to image")
-    raw, url = decode_image(data)
-    path = save_image(raw, cfg, "img")
-    return path, url, to_image_tensor(raw)
+    raws, urls = zip(*decode_images(data))
+    paths = save_images(raws, cfg, "img")
+    return paths, list(urls), to_image_tensor(list(raws))
 
 
-def edit_image(images, prompt, model, size, extra_json=""):
+def edit_image(images, prompt, model, size, options=None, mask=None, extra_json=""):
     """Tensor input wrapper; both entry points end up in edit_image_uris."""
-    cfg = load_config()
     if batch_length(images) > MAX_EDIT_IMAGES:
         raise RuntimeError("一次最多 %d 张输入图 / at most %d input images"
                            % (MAX_EDIT_IMAGES, MAX_EDIT_IMAGES))
     uris = batch_to_data_uris(images, MAX_EDIT_IMAGES)
-    return edit_image_uris(uris, prompt, model, size, extra_json)
+    mask_uri = batch_to_data_uris(mask, 1)
+    return edit_image_uris(uris, prompt, model, size, options,
+                           mask_uri[0] if mask_uri else None, extra_json)
 
 
-def edit_image_uris(uris, prompt, model, size, extra_json=""):
+def edit_image_uris(uris, prompt, model, size, options=None, mask=None, extra_json=""):
     """Edit from prepared URIs: connected IMAGEs and image_url lines both land here."""
     cfg = load_config()
-    payload = build_edit_payload(prompt, model, size, uris, extra_json)
+    payload = build_edit_payload(prompt, model, size, uris, options, mask, extra_json)
     data = request_image(cfg, "/images/edits", payload, "图像编辑 / image edit")
-    raw, url = decode_image(data)
-    path = save_image(raw, cfg, "edit")
-    return path, url, to_image_tensor(raw)
+    raws, urls = zip(*decode_images(data))
+    paths = save_images(raws, cfg, "edit")
+    return paths, list(urls), to_image_tensor(list(raws))
 
 
-def node_return(path, url, tensor):
-    result = (tensor, path, url)
-    preview = build_preview_ui(path)
-    if preview is None:
+def node_return(paths, urls, tensor):
+    result = (tensor, "\n".join(paths), "\n".join(urls))
+    previews = [preview for preview in (build_preview_ui(path) for path in paths) if preview]
+    if not previews:
         return {"result": result}
-    return {"ui": {"images": [preview]}, "result": result}
+    return {"ui": {"images": previews}, "result": result}
+
+
+def official_widgets(with_mask=False, with_fidelity=False):
+    """The official Images API widgets, appended after the original ones.
+
+    Appending (rather than inserting) keeps every existing widget at the same
+    position, so workflows saved before these fields existed keep their values.
+    """
+    widgets = {}
+    if with_mask:
+        widgets["mask"] = ("IMAGE", {
+            "tooltip": "Optional edit mask; the transparent area is what gets repainted"})
+    widgets["quality"] = (QUALITIES, {
+        "default": "auto", "tooltip": "Official quality field; auto = do not send it"})
+    widgets["background"] = (BACKGROUNDS, {
+        "default": "auto", "tooltip": "auto / transparent / opaque"})
+    widgets["output_format"] = (OUTPUT_FORMATS, {
+        "default": "auto", "tooltip": "auto / png / jpeg / webp"})
+    widgets["output_compression"] = ("INT", {
+        "default": 0, "min": 0, "max": 100,
+        "tooltip": "0-100, only sent for jpeg/webp (0 = do not send it)"})
+    widgets["moderation"] = (MODERATIONS, {
+        "default": "auto", "tooltip": "auto / low"})
+    if with_fidelity:
+        widgets["input_fidelity"] = (INPUT_FIDELITIES, {
+            "default": "default", "tooltip": "default / low / high - how closely the input is followed"})
+    widgets["n"] = ("INT", {
+        "default": 1, "min": 1, "max": 10,
+        "tooltip": "How many pictures to ask for; the gateway returned a single one in our tests"})
+    widgets["user"] = ("STRING", {
+        "default": "", "tooltip": "Official abuse-tracking field, sent when you fill it in"})
+    return widgets
 
 
 def pick_model(model, model_override):
@@ -507,13 +601,20 @@ class VergoraImageGenerator:
                                           "tooltip": "Extra request fields, e.g. {\"size\": \"1536x1024\"}"}),
                 "model_override": ("STRING", {"default": "",
                                               "tooltip": "Any other model id, wins over the dropdown"}),
+                **official_widgets(),
             },
         }
 
-    def run(self, prompt, model, size, extra_json="", model_override=""):
+    def run(self, prompt, model, size, extra_json="", model_override="",
+            quality="auto", background="auto", output_format="auto", output_compression=0,
+            moderation="auto", n=1, user=""):
         model = pick_model(model, model_override)
-        path, url, tensor = generate_image(prompt, model, size, extra_json)
-        return node_return(path, url, tensor)
+        options = official_options(quality=quality, background=background,
+                                   output_format=output_format,
+                                   output_compression=output_compression,
+                                   moderation=moderation, n=n, user=user)
+        paths, urls, tensor = generate_image(prompt, model, size, options, extra_json)
+        return node_return(paths, urls, tensor)
 
 
 class VergoraImageEditor:
@@ -548,18 +649,28 @@ class VergoraImageEditor:
                                           "tooltip": "Extra request fields, merged into the body last"}),
                 "model_override": ("STRING", {"default": "",
                                               "tooltip": "Any other model id, wins over the dropdown"}),
+                **official_widgets(with_mask=True, with_fidelity=True),
             },
         }
 
-    def run(self, prompt, model, size, image=None, image_url="", extra_json="", model_override=""):
+    def run(self, prompt, model, size, image=None, image_url="", extra_json="", model_override="",
+            mask=None, quality="auto", background="auto", output_format="auto",
+            output_compression=0, moderation="auto", input_fidelity="default", n=1, user=""):
         model = pick_model(model, model_override)
         extra_uris = split_uri_lines(image_url)
         if batch_length(image) + len(extra_uris) > MAX_EDIT_IMAGES:
             raise RuntimeError("一次最多 %d 张输入图 / at most %d input images"
                                % (MAX_EDIT_IMAGES, MAX_EDIT_IMAGES))
         uris = batch_to_data_uris(image, MAX_EDIT_IMAGES) + extra_uris
-        path, url, tensor = edit_image_uris(uris, prompt, model, size, extra_json)
-        return node_return(path, url, tensor)
+        mask_uri = batch_to_data_uris(mask, 1)
+        options = official_options(quality=quality, background=background,
+                                   output_format=output_format,
+                                   output_compression=output_compression,
+                                   moderation=moderation, input_fidelity=input_fidelity,
+                                   n=n, user=user)
+        paths, urls, tensor = edit_image_uris(
+            uris, prompt, model, size, options, mask_uri[0] if mask_uri else None, extra_json)
+        return node_return(paths, urls, tensor)
 
 
 NODE_CLASS_MAPPINGS = {

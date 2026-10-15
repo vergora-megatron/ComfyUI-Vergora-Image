@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.2.0 - 2026-10-15
+
+The adapter now speaks the full official Images API parameter set.
+
+Added
+
+- Official fields on both nodes: `quality`, `background`, `output_format`, `output_compression`,
+  `moderation`, `n` and `user`; the editor also gets `input_fidelity` and an optional `mask`
+  (IMAGE, transparent area is repainted).
+- A field is only put in the request body when it leaves its default, so a node nobody touched
+  sends exactly what 0.1.0 sent.
+- Replies with more than one picture are returned as an IMAGE batch and each picture is saved.
+
+Compatibility
+
+- **Not breaking.** The new widgets are appended to the optional group, so every widget that
+  existed in 0.1.0 keeps its position and workflows saved with 0.1.0 restore their values.
+
+Notes
+
+- Live status of each official field is tabulated in `README.md`. `prompt`, `model`, `size`,
+  `image` and the single-picture behaviour were measured on 2026-10-14; the fields added here are
+  sent but not yet measured, because on 2026-10-15 the image route answered
+  `500 do_request_failed: context deadline exceeded` (the relay's upstream provider stopped
+  responding) while `/v1/models` and the video route stayed healthy. Those rows get measured and
+  recorded as soon as the provider is back.
+- `partial_images` / `stream` are intentionally not exposed: a ComfyUI node returns one finished
+  value.
+
 ## 0.1.0 - 2026-10-14
 
 First release: two nodes for the Vergora image routes, both verified live against

@@ -86,6 +86,10 @@ Display name: `vergora 文生图（gpt-image）` · Category: `vergora`
 | `size` | COMBO | `1024x1024` | `1024x1024`, `1536x1024`, `1024x1536`, `1080x1920` (vertical) or `auto` (omit the field) |
 | `extra_json` | STRING (multiline) | empty | Extra request fields, merged into the body last |
 | `model_override` | STRING | empty | Any model id; wins over the dropdown when filled in |
+| `quality`, `background`, `output_format`, `moderation` | COMBO | `auto` | Official fields; `auto` means "do not send it" |
+| `output_compression` | INT | 0 | 0-100, only sent together with `jpeg` / `webp` |
+| `n` | INT | 1 | How many pictures to ask for (the gateway returned one in our tests) |
+| `user` | STRING | empty | Official abuse-tracking field, optional |
 
 | Output | Type | Notes |
 | --- | --- | --- |
@@ -106,6 +110,12 @@ Display name: `vergora 图像编辑（图生图）` · Category: `vergora`
 | `image_url` | STRING (multiline, optional) | empty | Picture URLs or data URIs, one per line; used when nothing is connected to `image` |
 | `extra_json` | STRING (multiline) | empty | Extra request fields, merged into the body last |
 | `model_override` | STRING | empty | Any model id; wins over the dropdown when filled in |
+| `mask` | IMAGE (optional) | - | Edit mask: the transparent area is what gets repainted |
+| `quality`, `background`, `output_format`, `moderation` | COMBO | `auto` | Official fields; `auto` means "do not send it" |
+| `output_compression` | INT | 0 | 0-100, only sent together with `jpeg` / `webp` |
+| `input_fidelity` | COMBO | `default` | `low` / `high`; how closely the input is followed |
+| `n` | INT | 1 | How many pictures to ask for |
+| `user` | STRING | empty | Official abuse-tracking field, optional |
 
 Both inputs are optional, so an editor you dropped on the canvas but have not wired up does
 not block the queue; it only complains when it actually runs without a picture, and then it
@@ -155,6 +165,41 @@ client = OpenAI(base_url="https://api.vergora.ai/v1", api_key="sk-your-key")
 client.images.generate(model="gpt-image-2", prompt="a red paper boat", size="1024x1024")
 client.images.edit(model="gpt-image-2", image=open("in.png", "rb"), prompt="make it watercolour")
 ```
+
+## Official parameter set
+
+The widgets now cover the official Images API. A field is sent **only when it leaves its default**,
+so an untouched node sends exactly the request it sent from the very first release, and the new
+widgets were *appended* to the optional group - workflows saved earlier keep their values.
+
+| Official field | Values | Node | Status on this gateway |
+| --- | --- | --- | --- |
+| `prompt` | text | both | verified |
+| `model` | three ids (see above) | both | verified |
+| `size` | `auto`, `1024x1024`, `1536x1024`, `1024x1536`, `1080x1920` | both | verified (`auto` omits it; square answers 1254x1254, 9:16 answers ~941x1672) |
+| `image` | data URI string or array, up to 10 | edit | verified |
+| `mask` | PNG data URI; the transparent area is repainted | edit | sent by the node, **live check pending** |
+| `n` | 1-10 | both | accepted, but the gateway answered with one picture even for `n=3` |
+| `quality` | `low` / `medium` / `high` | both | accepted; effect not measured yet |
+| `background` | `transparent` / `opaque` | both | **live check pending** |
+| `output_format` | `png` / `jpeg` / `webp` | both | **live check pending** (the saved extension always follows whatever actually comes back) |
+| `output_compression` | 0-100 | both | only sent for jpeg/webp; **live check pending** |
+| `moderation` | `auto` / `low` | both | **live check pending** |
+| `input_fidelity` | `low` / `high` | edit | **live check pending** |
+| `user` | string | both | accepted; optional |
+| `extra_json` | any JSON object | both | escape hatch, merged last so it can override every field above |
+
+Why some rows are still "live check pending": on 2026-10-15 the image route answered
+`500 do_request_failed: context deadline exceeded` after roughly two minutes on every attempt - the
+relay's upstream provider was not responding - while `/v1/models` and the video route stayed fine.
+The rows marked *verified* were measured live on 2026-10-14. As soon as the provider answers again
+the remaining rows get measured and the result lands in `CHANGELOG.md`.
+
+If a reply ever contains more than one picture the node returns them as an **IMAGE batch** (and
+saves each one), so `n` needs no extra plumbing if the platform starts honouring it.
+
+`partial_images` and `stream` exist in the official API for streaming partial results. They are
+deliberately not exposed: a ComfyUI node returns one finished value, not a stream.
 
 ## Model coverage, checked 2026-10-14
 
@@ -318,6 +363,34 @@ client = OpenAI(base_url="https://api.vergora.ai/v1", api_key="sk-你的密钥")
 client.images.generate(model="gpt-image-2", prompt="一只红色纸船", size="1024x1024")
 client.images.edit(model="gpt-image-2", image=open("in.png", "rb"), prompt="改成水彩风格")
 ```
+
+**官方参数面（0.2.0 起）**
+
+控件的顺序是**在原有可选参数后面追加**的，所以之前保存的工作流不会错位；每个字段**只有离开默认值才发送**——什么都不改时，请求体和 0.1.0 一字不差。
+
+| 官方字段 | 取值 | 用在 | 这个网关上的状态 |
+| --- | --- | --- | --- |
+| `prompt` / `model` / `size` | 见上表 | 两个节点 | 已实测 |
+| `image` | data URI 字符串或数组（最多 10） | 图像编辑 | 已实测 |
+| `mask` | PNG data URI，透明区域就是被重绘的范围 | 图像编辑 | 已接入，**待实测** |
+| `n` | 1-10 | 两个节点 | 被接受，但即使传 3 上游也只回 1 张 |
+| `quality` | low / medium / high | 两个节点 | 被接受，效果尚未测 |
+| `background` | transparent / opaque | 两个节点 | **待实测** |
+| `output_format` | png / jpeg / webp | 两个节点 | **待实测**（落盘扩展名始终以实际返回的格式为准） |
+| `output_compression` | 0-100 | 两个节点 | 只在 jpeg/webp 时发送，**待实测** |
+| `moderation` | auto / low | 两个节点 | **待实测** |
+| `input_fidelity` | low / high | 图像编辑 | **待实测** |
+| `user` | 字符串 | 两个节点 | 被接受，可选 |
+| `extra_json` | 任意 JSON 对象 | 两个节点 | 逃生口，最后合并，能覆盖以上任何字段 |
+
+为什么有一堆"待实测"：2026-10-15 当天图像通道的上游（aicost.me）不响应，每次请求都在约两分钟后返回
+`500 do_request_failed: context deadline exceeded`，而 `/v1/models` 和视频通道同时是正常的。标"已实测"
+的是 10-14 当天真实测过的。上游一恢复我就把这些补测完，结果写进 `CHANGELOG.md`。
+
+如果某次返回里真的有多张图，节点会把它们作为 **IMAGE 批次**返回并逐张落盘，所以 `n` 不需要额外改造。
+
+官方的 `partial_images` / `stream` 是流式返回局部结果用的，**故意不暴露**：ComfyUI 的节点是"一次返回一个
+完成值"，不是流。
 
 **费用**：每次运行都是真实出图。接口不暴露单价（`GET /v1/models` 里所有模型的价格都是 0），
 但模型页自己的数据里有（2026-10-14 抄自页面）：
