@@ -6,7 +6,10 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = []
 
+[project.urls]
+Repository = "https://github.com/vergora-megatron/ComfyUI-Vergora-Image"
+
 [tool.comfy]
-PublisherId = "vergora"
+PublisherId = "levi-li"
 DisplayName = "ComfyUI Vergora Image"
-Icon = ""
+Icon = "https://raw.githubusercontent.com/vergora-megatron/ComfyUI-Vergora-Image/main/icon.svg"
