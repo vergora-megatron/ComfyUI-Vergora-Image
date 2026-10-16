@@ -33,6 +33,12 @@ KEY =
 # the error appear sooner.
 TIMEOUT = 300
 
+# Retry once when the connection drops before the platform answers
+# (an http2 GOAWAY or a connection reset). Timeouts are never retried, because the
+# picture may already have been produced and billed. Set to 0 to switch even the
+# dropped-connection retry off.
+RETRY_CONNECTION_ERRORS = 1
+
 # Folder where finished pictures are saved.
 # Leave empty to use ComfyUI's own output directory (recommended).
 OUTPUT_DIR =

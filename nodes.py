@@ -72,6 +72,11 @@ SIZES = ["1024x1024", "1536x1024", "1024x1536", "1080x1920", "auto"]
 
 MAX_EDIT_IMAGES = 10
 
+# A dropped connection is worth one retry; a timeout is not - see request_image.
+CONNECTION_ERROR_MARKERS = ("goaway", "connection reset", "connection was closed", "unexpected eof",
+                            "broken pipe", "remotedisconnected", "connection aborted",
+                            "connection refused")
+
 # The official Images API vocabulary. "auto"/"default" means "do not send the
 # field", so a node that is not touched sends exactly the request it sent before
 # these widgets existed.
@@ -100,14 +105,19 @@ def http_post_json(url, headers, payload, timeout=300):
     """Return (status_code, response_text)."""
     body = json.dumps(payload).encode("utf-8")
     if requests is not None:
-        response = requests.post(url, headers=headers, data=body, timeout=timeout)
-        return response.status_code, response.text
+        try:
+            response = requests.post(url, headers=headers, data=body, timeout=timeout)
+            return response.status_code, response.text
+        except Exception as exc:  # noqa: BLE001 - reset, EOF, DNS, TLS, ...
+            return 0, "transport error: %s" % exc
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.getcode(), response.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read().decode("utf-8", "replace")
+    except Exception as exc:  # noqa: BLE001 - reset, EOF, DNS, TLS, ...
+        return 0, "transport error: %s" % exc
 
 
 def http_download(url, timeout=300):
@@ -131,6 +141,7 @@ def load_config():
         "api_key": "",
         "timeout": 300.0,
         "output_dir": "",
+        "retry_connection_errors": 1,
     }
     if os.path.exists(CONFIG_PATH):
         parser = configparser.ConfigParser()
@@ -144,6 +155,8 @@ def load_config():
                 cfg["api_key"] = key
         if parser.has_section("RUNTIME"):
             cfg["timeout"] = parser.getfloat("RUNTIME", "TIMEOUT", fallback=cfg["timeout"])
+            cfg["retry_connection_errors"] = parser.getint(
+                "RUNTIME", "RETRY_CONNECTION_ERRORS", fallback=cfg["retry_connection_errors"])
             out_dir = parser.get("RUNTIME", "OUTPUT_DIR", fallback="").strip()
             if out_dir:
                 cfg["output_dir"] = out_dir
@@ -466,6 +479,10 @@ def describe_error(status, text):
                             or "context deadline exceeded" in lowered):
         hint = ("（平台转发到上游超时：属于平台/上游侧问题，不是你的参数问题，稍后重试即可 / "
                 "the relay's upstream provider timed out - platform side, not your parameters）")
+    elif status == 0 or any(marker in lowered for marker in CONNECTION_ERROR_MARKERS):
+        hint = ("（连接在出图前被中断：属于平台/网络侧波动，不是参数问题，重跑一次通常就好 / "
+                "the connection dropped before the picture was produced - platform or network "
+                "side; just run it again）")
     elif "model_price_unavailable" in lowered:
         hint = ("（这个模型在平台侧没有定价，目前调不通；请改用 gpt-image-2 / gpt-image-2.5-flare / "
                 "gpt-image-2.5-sunburst / the model has no price configured upstream - use one of the "
@@ -475,12 +492,37 @@ def describe_error(status, text):
     return "HTTP %s: %s%s" % (status, detail[:400], hint)
 
 
-def request_image(cfg, route, payload, what):
-    preview = json.dumps({k: short_value(v) for k, v in payload.items()}, ensure_ascii=False)
-    log("[vergora] 提交 %s / submit -> %s  %s" % (what, cfg["base_url"] + route, preview[:600]))
+def is_connection_level_failure(status, text):
+    """True when the connection died before the gateway could answer.
 
-    status, text = http_post_json(cfg["base_url"] + route, auth_headers(cfg), payload, timeout=cfg["timeout"])
+    Only this case is retried once: no picture had been produced yet. A timeout is
+    never retried (not here, not by hand-rolled logic) because the model may
+    already have run and the picture may already be on the bill.
+    """
+    if status != 0 and not 500 <= status < 600:
+        return False
+    lowered = text.lower()
+    if "context deadline exceeded" in lowered or "do_request_failed" in lowered:
+        return False
+    if status == 0:
+        return not ("timeout" in lowered or "timed out" in lowered)
+    return any(marker in lowered for marker in CONNECTION_ERROR_MARKERS)
+
+
+def request_image(cfg, route, payload, what):
+    url = cfg["base_url"] + route
+    preview = json.dumps({k: short_value(v) for k, v in payload.items()}, ensure_ascii=False)
+    log("[vergora] 提交 %s / submit -> %s  %s" % (what, url, preview[:600]))
+
+    headers = auth_headers(cfg)
+    status, text = http_post_json(url, headers, payload, timeout=cfg["timeout"])
+    if cfg["retry_connection_errors"] > 0 and is_connection_level_failure(status, text):
+        log("[vergora] 连接在出图前被中断，自动重试一次 / the connection dropped before an answer, "
+            "retrying once")
+        status, text = http_post_json(url, headers, payload, timeout=cfg["timeout"])
     if status >= 400:
+        raise RuntimeError("%s 失败 / failed: %s" % (what, describe_error(status, text)))
+    if status == 0:
         raise RuntimeError("%s 失败 / failed: %s" % (what, describe_error(status, text)))
     try:
         data = json.loads(text)

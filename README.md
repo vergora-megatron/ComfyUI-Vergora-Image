@@ -257,6 +257,7 @@ pointing a batch of images at it.
 | `503 No available channel for model xxx` | The model name is not available on the platform |
 | `500 model_price_unavailable` | The model is in the catalogue but has no price configured, so the platform refuses the call |
 | `524` | The platform edge timed out. Image generation is synchronous, so a slow job can trip it; retry, or use a smaller `size`. This is the platform's edge timeout, not a local one |
+| `500 http2: server sent GOAWAY` / `connection reset` | The relay's link to its upstream provider dropped mid-flight (platform side). The node retries this once by itself; if it still fails, press Run again |
 | `403 insufficient_quota` | The account behind the key is out of quota. Top it up in the console |
 | `400` | The upstream rejected the parameters - the gateway message is shown in the error |
 | Picture missing from the result panel | The file went to `OUTPUT_DIR`, or to ComfyUI's output directory when that setting is empty; a file saved outside the output directory is not previewed |
@@ -272,9 +273,11 @@ pointing a batch of images at it.
   after the platform adds something.
 - Pricing, availability and the accepted parameters belong to the platform; the nodes pass
   them through and only validate the obvious mistakes locally.
-- The nodes deliberately do **not** retry a failed picture. A `524` can mean the picture
-  was rendered and billed upstream even though the edge gave up on waiting, so a silent
-  automatic retry could pay twice. Retry by hand when you want to.
+- A **dropped connection** (`http2 GOAWAY`, `connection reset`, a reset before any reply) is
+  retried **once** automatically: nothing had been produced yet. Anything that came back with a
+  status code is never retried - a `524` or an upstream `context deadline exceeded` can mean the
+  picture was rendered and billed, so retrying automatically could pay twice. Set
+  `RETRY_CONNECTION_ERRORS = 0` in `config.ini` to switch even that off.
 - Editing kept the source picture's framing in our tests (a watercolour reinterpretation
   came back with the same composition), but that is model behaviour, not a guarantee.
 
@@ -408,14 +411,19 @@ client.images.edit(model="gpt-image-2", image=open("in.png", "rb"), prompt="改�
 | `503 No available channel for model xxx` | 模型名不在平台可用列表里 |
 | `500 model_price_unavailable` | 模型在目录里但平台没配价格，网关直接拒掉这次调用 |
 | `524` | 平台边缘节点超时；出图是同步请求，上游慢就会撞上，重试或把 `size` 调小 |
+| `500 http2: server sent GOAWAY` / `connection reset` | 平台转发到上游的链路中途断开（平台/网络侧）。节点会自动重试一次；仍失败就再点一次运行 |
 | `403 insufficient_quota` | 账号额度不足，去控制台充值 |
 
 **注意**：`image_url` 指向的是平台资产域名（实测是 `www.aicost.me`）上的临时文件，不要当长期
 链接保存；如果前端有域名白名单，要把这个域名也加进去。图片已由节点落盘到输出目录，直接用本地
 文件最稳。
 
-节点**不会自动重试**失败的请求：`524` 往往意味着上游其实已经出图并计费，只是边缘节点没等到返回，
-自动重试可能白花第二笔钱——要重试就手动再点一次。
+节点**不会自动重试"已经拿到回复的"失败请求**：`524` 往往意味着上游其实已经出图并计费，只是边缘节点
+没等到返回，自动重试可能白花第二笔钱——这种情况要重试就手动再点一次。
+
+唯一的例外是**连接在出图前被中断**（`http2 GOAWAY`、连接被重置、还没收到任何回复）：这种情况节点会自动
+重试一次，因为此时还没有产出。只要对方回了状态码（`524`、上游 `context deadline exceeded`）就绝不自动
+重试。想连这一次重试也关掉，把 `config.ini` 里的 `RETRY_CONNECTION_ERRORS` 设成 `0`。
 
 **自测**：`python test_offline.py` 用假的 HTTP 层跑通两个节点的请求构造、单图/多图编辑、URL
 兜底、错误翻译和输出注册，不联网、不花钱、不需要密钥。

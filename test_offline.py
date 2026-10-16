@@ -24,7 +24,8 @@ OUT_DIR = tempfile.mkdtemp(prefix="vergora_image_test_")
 REAL_LOAD_CONFIG = nodes.load_config
 
 STATE = {"url": None, "payload": None, "headers": None, "download_url": None,
-         "mode": "b64", "status": 200, "body": None, "entries": 1}
+         "mode": "b64", "status": 200, "body": None, "entries": 1,
+         "responses": [], "posts": 0}
 
 
 class FakeFolderPaths:
@@ -60,6 +61,9 @@ def fake_post_json(url, headers, payload, timeout=300):
     STATE["url"] = url
     STATE["payload"] = payload
     STATE["headers"] = headers
+    STATE["posts"] += 1
+    if STATE["responses"]:
+        return STATE["responses"].pop(0)
     if STATE["status"] >= 400:
         return STATE["status"], STATE["body"]
     if STATE["mode"] == "b64":
@@ -84,6 +88,7 @@ def prepare():
         "api_key": "sk-test",
         "timeout": 30,
         "output_dir": "",  # empty -> use folder_paths' output directory
+        "retry_connection_errors": 1,
     }
 
 
@@ -260,9 +265,47 @@ def main():
 
     # a missing key is reported before the request leaves
     nodes.load_config = lambda: {"base_url": "https://api.vergora.ai/v1", "api_key": "",
-                                 "timeout": 30, "output_dir": ""}
+                                 "timeout": 30, "output_dir": "", "retry_connection_errors": 1}
     expect_error("没有配置 API key", lambda: call(generator, prompt="x", model="gpt-image-2",
                                                   size="1024x1024"))
+    prepare()
+
+    # ---- a dropped connection is retried once; a timeout never is ----
+    goaway = ('{"error": {"message": "http2: server sent GOAWAY and closed the connection; '
+              'LastStreamId=1, ErrCode=NO_ERROR", "code": 500}}')
+    STATE["responses"] = [(500, goaway)]
+    STATE["posts"] = 0
+    _, result_retry = call(generator, prompt="flaky", model="gpt-image-2", size="auto")
+    assert STATE["posts"] == 2, STATE["posts"]
+    assert os.path.exists(result_retry[1]), result_retry
+
+    STATE["responses"] = [(0, "transport error: ConnectionResetError(10054)")]
+    STATE["posts"] = 0
+    _, result_reset = call(generator, prompt="reset", model="gpt-image-2", size="auto")
+    assert STATE["posts"] == 2, STATE["posts"]
+    assert os.path.exists(result_reset[1]), result_reset
+
+    deadline = ('{"error": {"message": "do request failed: Post ...: context deadline exceeded",'
+                '"code": "do_request_failed"}}')
+    STATE["responses"] = [(500, deadline)]
+    STATE["posts"] = 0
+    expect_error("上游超时", lambda: call(generator, prompt="slow", model="gpt-image-2", size="auto"))
+    assert STATE["posts"] == 1, STATE["posts"]
+
+    # a connection that stays broken twice surfaces the translated message
+    STATE["responses"] = [(0, "transport error: ConnectionResetError(10054)"),
+                          (0, "transport error: ConnectionResetError(10054)")]
+    expect_error("连接在出图前被中断", lambda: call(generator, prompt="dead", model="gpt-image-2",
+                                                   size="auto"))
+
+    # and the retry can be switched off entirely
+    nodes.load_config = lambda: {"base_url": "https://api.vergora.ai/v1", "api_key": "sk-test",
+                                 "timeout": 30, "output_dir": "", "retry_connection_errors": 0}
+    STATE["responses"] = [(500, goaway)]
+    STATE["posts"] = 0
+    expect_error("连接在出图前被中断", lambda: call(generator, prompt="no-retry",
+                                                   model="gpt-image-2", size="auto"))
+    assert STATE["posts"] == 1, STATE["posts"]
     prepare()
 
     # ---- gateway errors are translated ----

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1 - 2026-10-16
+
+Bug fixes
+
+- A connection that drops before the platform answers (`http2: server sent GOAWAY and closed the
+  connection`, a connection reset, or a transport error with no reply at all) is now retried
+  **once**, and the failure is translated instead of shown raw. Timeouts are still never retried:
+  a `524` or an upstream `context deadline exceeded` can mean the picture was already rendered and
+  billed.
+- `RETRY_CONNECTION_ERRORS` in the `[RUNTIME]` section of `config.ini` turns that retry off
+  (default `1` = on).
+
 ## 0.2.0 - 2026-10-15
 
 The adapter now speaks the full official Images API parameter set.
